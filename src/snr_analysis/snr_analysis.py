@@ -17,7 +17,7 @@ PHASE_NAMES = [
     "takeoff",
     "hover",
     "altitude_increase",
-    "decrease",
+    "altitude_decrease",
     "landing",
 ]
 
