@@ -21,7 +21,6 @@ PHASE_NAMES = [
     "landing",
 ]
 
-
 def load_audio(file_path: str | Path, target_sample_rate: int | None = None) -> Tuple[np.ndarray, int]:
     """
     Load a WAV file as mono float32 audio.
@@ -41,6 +40,7 @@ def load_audio(file_path: str | Path, target_sample_rate: int | None = None) -> 
     if signal.ndim > 1:
         signal = np.mean(signal, axis=1, dtype=np.float32)
 
+    # Adjust sampling to match each other
     if target_sample_rate is not None and sample_rate != target_sample_rate:
         gcd = np.gcd(sample_rate, target_sample_rate)
         up = target_sample_rate // gcd
@@ -203,6 +203,8 @@ def resolve_phase_paths(base_dir: str | Path, phase_names: Iterable[str]) -> Dic
 
 
 def main() -> None:
+
+    # Define parser to define audio recording files
     parser = argparse.ArgumentParser(
         description="Estimate framewise and phase-wise SNR for drone audio phases."
     )
@@ -244,13 +246,16 @@ def main() -> None:
     for phase_name in PHASE_NAMES:
         phase_signal, phase_sample_rate = load_audio(phase_paths[phase_name], target_sample_rate=sample_rate)
 
+        # Check sample rate. Throw error if not equal
         if phase_sample_rate != sample_rate:
             raise ValueError(f"Sample rate mismatch after loading phase: {phase_name}")
 
+        # Calculate SNR
         snr_db, frame_times = compute_snr(phase_signal, sample_rate, background_power)
         stats = summarize_snr(snr_db)
         print_phase_summary(phase_name, stats)
 
+        # Optional: Plot individual SNR
         smoothed_snr = None
         if args.smooth_window > 1:
             smoothed_snr = smooth_curve(snr_db, args.smooth_window)
@@ -263,6 +268,7 @@ def main() -> None:
             if frame_times.size:
                 time_offset += float(frame_times[-1] + (HOP_LENGTH_MS / 1000.0))
 
+    # Optional: Plot All SNR
     if args.plot_full and all_times and all_snr:
         full_times = np.concatenate(all_times)
         full_snr = np.concatenate(all_snr)
