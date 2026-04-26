@@ -6,77 +6,139 @@ import noisereduce as nr
 import sys
 import os
 
-from scipy.signal import medfilt
-
 
 def rms_normalize(y, target_rms=0.08):
-    rms = np.sqrt(np.mean(y**2) + 1e-12)
+    rms = np.sqrt(np.mean(y ** 2) + 1e-12)
     return y * (target_rms / (rms + 1e-12))
 
 
-def butter_highpass(y, sr, cutoff=80, order=4):
+def butter_highpass(y, sr, cutoff=180, order=4):
     b, a = signal.butter(order, cutoff / (sr / 2), btype="high")
-    return signal.lfilter(b, a, y)
+    return signal.filtfilt(b, a, y)
 
 
-def butter_bandpass(y, sr, low=100, high=3000, order=4):
-    b, a = signal.butter(order, [low / (sr / 2), high / (sr / 2)], btype="band")
-    return signal.lfilter(b, a, y)
+def butter_bandpass(y, sr, low=180, high=7000, order=4):
+    b, a = signal.butter(
+        order,
+        [low / (sr / 2), high / (sr / 2)],
+        btype="band"
+    )
 
-def stft_drone_mask(y, sr, n_fft=2048, hop_length=512, low=60, high=4000):
+    return signal.filtfilt(b, a, y)
+
+
+def spectral_gate(
+    y,
+    sr,
+    n_fft=2048,
+    hop_length=512,
+    noise_percentile=15
+):
     D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
-    S_mag, S_phase = librosa.magphase(D)
 
-    # Estimate per-frequencty noise floor
-    noise_floor = np.percentile(S_mag, 20, axis=1, keepdims=True)
+    magnitude = np.abs(D)
+    phase = np.angle(D)
 
-    # Soft mask
-    mask = S_mag / (S_mag + noise_floor + 1e-8)
+    # Estimate noise floor per frequency bin
+    noise_floor = np.percentile(
+        magnitude,
+        noise_percentile,
+        axis=1,
+        keepdims=True
+    )
 
-    # Frequency weighting toward likely drone band
-    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
-    band_weight = np.ones((len(freqs), 1)) * 0.25
-    band_weight[(freqs >= low) & (freqs <= high)] = 1.0
-    mask *= band_weight
+    # Soft attenuation instead of hard masking
+    attenuation = np.maximum(
+        magnitude - noise_floor,
+        0
+    ) / (magnitude + 1e-10)
 
-    # Smooth mask
-    mask = medfilt(mask, kernel_size=(5,5))
-    mask = np.clip(mask, 0.0, 1.0)
+    # Preserve some ambience to avoid artifacts
+    attenuation = 0.25 + (0.75 * attenuation)
 
-    S_clean = S_mag * mask
-    y_clean = librosa.istft(S_clean * S_phase, hop_length=hop_length)
+    cleaned_mag = magnitude * attenuation
 
-    return y_clean
+    cleaned = librosa.istft(
+        cleaned_mag * np.exp(1j * phase),
+        hop_length=hop_length
+    )
+
+    return cleaned
+
+
+def harmonic_enhancement(y):
+    harmonic, percussive = librosa.effects.hpss(y)
+
+    # Keep mostly harmonic content
+    return (0.85 * harmonic) + (0.15 * percussive)
 
 
 def isolate_drone_audio(input_path, output_path):
-    y, sr = librosa.load(input_path, sr=None, mono=True)
 
+    # Load mono audio
+    y, sr = librosa.load(
+        input_path,
+        sr=None,
+        mono=True
+    )
+
+    # Normalize
     y = rms_normalize(y)
 
-    # More aggressive wind removal
-    y = butter_highpass(y, sr, cutoff=150)
+    # Remove wind rumble
+    y = butter_highpass(
+        y,
+        sr,
+        cutoff=180
+    )
 
-    # Wider drone harmonic range
-    y = butter_bandpass(y, sr, low=150, high=8000)
+    # Focus on drone harmonic range
+    y = butter_bandpass(
+        y,
+        sr,
+        low=180,
+        high=7000
+    )
 
+    # Mild adaptive noise reduction
+    y = nr.reduce_noise(
+        y=y,
+        sr=sr,
+        stationary=False,
+        prop_decrease=0.25
+    )
+
+    # Spectral gating
+    y = spectral_gate(y, sr)
+
+    # Emphasize harmonic drone structure
+    y = harmonic_enhancement(y)
+
+    # Final normalize
     y = rms_normalize(y)
 
+    # Prevent clipping
     y = np.clip(y, -1.0, 1.0)
 
+    # Save
     sf.write(output_path, y, sr)
+
+    print(f"Saved cleaned audio to: {output_path}")
 
 
 if __name__ == "__main__":
+
     if len(sys.argv) != 2:
-        print("Usage: python drone_cleaner.py input.wav")
+        print("Usage: python drone_isolation.py input.wav")
+
     else:
         input_path = sys.argv[1]
 
-        # Split filename and extension
         base, ext = os.path.splitext(input_path)
 
-        # Create new filename
-        output_path = f"{base}(clean){ext}"
+        output_path = f"{base}(isolated){ext}"
 
-        isolate_drone_audio(input_path, output_path)
+        isolate_drone_audio(
+            input_path,
+            output_path
+        )

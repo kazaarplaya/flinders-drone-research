@@ -2,26 +2,47 @@ import librosa
 import numpy as np
 import sys
 
-def band_energy_ratio(file):
+
+def band_power_ratio(file, low=60, high=4000):
+    # Load audio
     y, sr = librosa.load(file, sr=None)
+
+    # STFT
     S = np.abs(librosa.stft(y))
+
+    # Convert magnitude -> power
+    power = S ** 2
+
+    # Frequency bins
     freqs = librosa.fft_frequencies(sr=sr)
 
-    band = (freqs >= 60) & (freqs <= 4000)
+    # Frequency mask
+    band = (freqs >= low) & (freqs <= high)
 
-    return np.sum(S[band]) / np.sum(S)
+    # Compute ratio
+    band_power = np.sum(power[band])
+    total_power = np.sum(power)
+
+    ratio = band_power / (total_power + 1e-12)
+
+    return ratio
+
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python compare.py file1.wav file2.wav")
+    if len(sys.argv) < 2:
+        print("Usage:")
+        print("python compare.py file1.wav file2.wav")
         sys.exit(1)
 
-    file1 = sys.argv[1]
-    file2 = sys.argv[2]
+    files = sys.argv[1:]
 
-    for f in [file1, file2]:
+    for f in files:
         try:
-            ratio = band_energy_ratio(f)
-            print(f"{f}: {ratio:.4f}")
+            ratio = band_power_ratio(f)
+
+            print(f"{f}")
+            print(f"Band Power Ratio (60Hz-4000Hz): {ratio:.4f}")
+            print()
+
         except Exception as e:
-            print(f"Error with {f}: {e}")
+            print(f"Error processing {f}: {e}")
