@@ -22,7 +22,6 @@ signal, sample_rate = librosa.load(args.audio, sr=None)
 # Compute STFT
 stft = librosa.stft(signal)
 
-
 # Convert amplitude to decibels
 spectrogram_db = librosa.amplitude_to_db(np.abs(stft), ref=np.max)
 

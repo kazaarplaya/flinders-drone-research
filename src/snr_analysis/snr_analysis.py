@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.io import wavfile
 from scipy.signal import resample_poly
+import json
 
 
 EPSILON = 1e-10
@@ -118,7 +119,7 @@ def compute_snr(
     return snr_db, frame_times
 
 
-def summarize_snr(snr_db: np.ndarray) -> Dict[str, float]:
+def summarise_snr(snr_db: np.ndarray) -> Dict[str, float]:
     """Return summary statistics for one phase."""
     snr_db = np.asarray(snr_db, dtype=np.float32)
     return {
@@ -195,6 +196,9 @@ def print_phase_summary(phase_name: str, stats: Dict[str, float]) -> None:
     print(f"Max: {stats['max']:.2f} dB")
     print()
 
+def print_frame_snr(snr: np.ndarray , ft: np.ndarray) -> None:
+    for frame, db in zip(ft, snr):
+        print(f"Frame {frame}: {db} dB")
 
 def resolve_phase_paths(base_dir: str | Path, phase_names: Iterable[str]) -> Dict[str, Path]:
     """Build expected file paths for each phase WAV file."""
@@ -251,16 +255,38 @@ def main() -> None:
             raise ValueError(f"Sample rate mismatch after loading phase: {phase_name}")
 
         # Calculate SNR
-        snr_db, frame_times = compute_snr(phase_signal, sample_rate, background_power)
-        stats = summarize_snr(snr_db)
+        snr_db, frame_times = compute_snr(
+            phase_signal,
+            sample_rate,
+            background_power
+        )
+
+        # Smooth SNR profile
+        smoothed_snr = smooth_curve(snr_db, args.smooth_window)
+        with open(f".\data\processed\snr_profiles\{phase_name}_snr.json", "w") as f:
+            json.dump(
+                {
+                    "phase": phase_name,
+                    "frame_times": frame_times.tolist(),
+                    "smoothed_snr_db": smoothed_snr.tolist()
+                },
+                f,
+                indent=4
+            )
+
+        # Print smoothed SNR for each frame/window
+        # print(f"\n{phase_name.replace('_', ' ').title()} Smoothed Framewise SNR:")
+
+        # for i, (time, snr) in enumerate(zip(frame_times, smoothed_snr)):
+        #     print(
+        #         f"Frame {i:04d} | "
+        #         f"Time: {time:.2f}s | "
+        #         f"Smoothed SNR: {snr:.2f} dB"
+        #     )
+
+        # Summary statistics
+        stats = summarise_snr(smoothed_snr)
         print_phase_summary(phase_name, stats)
-
-        # Optional: Plot individual SNR
-        smoothed_snr = None
-        if args.smooth_window > 1:
-            smoothed_snr = smooth_curve(snr_db, args.smooth_window)
-
-        plot_phase_snr(phase_name, frame_times, snr_db, smoothed_snr=smoothed_snr)
 
         if args.plot_full:
             all_times.append(frame_times + time_offset)
