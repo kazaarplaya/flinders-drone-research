@@ -38,7 +38,7 @@ def spectral_gate(
 
     magnitude = np.abs(D)
     phase = np.angle(D)
-
+    
     # Estimate noise floor per frequency bin
     noise_floor = np.percentile(
         magnitude,
@@ -116,7 +116,7 @@ def isolate_drone_audio(input_path, output_path):
 
     # Final normalize
     y = rms_normalize(y)
-
+    
     # Prevent clipping
     y = np.clip(y, -1.0, 1.0)
 
