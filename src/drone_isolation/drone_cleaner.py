@@ -32,13 +32,16 @@ def spectral_gate(
     sr,
     n_fft=2048,
     hop_length=512,
-    noise_percentile=15
+    noise_percentile=15,
+    low=None,
+    high=None,
+    out_of_band_gain=0.1
 ):
     D = librosa.stft(y, n_fft=n_fft, hop_length=hop_length)
 
     magnitude = np.abs(D)
     phase = np.angle(D)
-    
+
     # Estimate noise floor per frequency bin
     noise_floor = np.percentile(
         magnitude,
@@ -55,6 +58,13 @@ def spectral_gate(
 
     # Preserve some ambience to avoid artifacts
     attenuation = 0.25 + (0.75 * attenuation)
+
+    # Crush bins outside the estimated drone band
+    if low is not None and high is not None:
+        freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+        in_band = (freqs >= low) & (freqs <= high)
+        band_gain = np.where(in_band, 1.0, out_of_band_gain)
+        attenuation = attenuation * band_gain[:, None]
 
     cleaned_mag = magnitude * attenuation
 
@@ -73,6 +83,47 @@ def harmonic_enhancement(y):
     return (0.85 * harmonic) + (0.15 * percussive)
 
 
+def estimate_drone_band(
+    y,
+    sr,
+    n_fft=4096,
+    hop_length=1024,
+    f0_min=40,
+    f0_max=400,
+    n_harmonics=5,
+    low_pct=0.01,
+    high_pct=0.995
+):
+
+    # Long-term average magnitude spectrum
+    mag = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
+    mean_spec = mag.mean(axis=1)
+    freqs = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    power = mean_spec ** 2
+
+    # Harmonic Product Spectrum -> fundamental, used to guard the low edge
+    hps = mean_spec.copy()
+    for h in range(2, n_harmonics + 1):
+        decimated = mean_spec[::h]
+        hps[:len(decimated)] *= decimated
+
+    valid = (freqs >= f0_min) & (freqs <= f0_max)
+    f0 = freqs[np.argmax(np.where(valid, hps, 0.0))]
+
+    # Band edges from where the spectral energy actually lives.
+    # A drone is a dense harmonic comb (dozens of partials into the kHz),
+    # so bound by cumulative energy rather than a fixed harmonic count.
+    cum = np.cumsum(power) / power.sum()
+    low = freqs[np.searchsorted(cum, low_pct)]
+    high = freqs[np.searchsorted(cum, high_pct)]
+
+    # Never cut above the fundamental; clamp to sane range
+    low = max(min(low, f0 * 0.8), 20.0)
+    high = min(high, sr * 0.475)
+
+    return float(low), float(high), float(f0)
+
+
 def isolate_drone_audio(input_path, output_path):
 
     # Load mono audio
@@ -85,19 +136,23 @@ def isolate_drone_audio(input_path, output_path):
     # Normalize
     y = rms_normalize(y)
 
+    # Estimate the drone band from the signal itself
+    low, high, f0 = estimate_drone_band(y, sr)
+    print(f"Estimated drone f0={f0:.1f} Hz, band {low:.0f}-{high:.0f} Hz")
+
     # Remove wind rumble
     y = butter_highpass(
         y,
         sr,
-        cutoff=180
+        cutoff=low
     )
 
     # Focus on drone harmonic range
     y = butter_bandpass(
         y,
         sr,
-        low=180,
-        high=7000
+        low=low,
+        high=high
     )
 
     # Mild adaptive noise reduction
@@ -108,8 +163,8 @@ def isolate_drone_audio(input_path, output_path):
         prop_decrease=0.25
     )
 
-    # Spectral gating
-    y = spectral_gate(y, sr)
+    # Spectral gating, focused on the estimated drone band
+    y = spectral_gate(y, sr, low=low, high=high)
 
     # Emphasize harmonic drone structure
     y = harmonic_enhancement(y)
