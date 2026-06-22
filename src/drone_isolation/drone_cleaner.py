@@ -92,7 +92,8 @@ def estimate_drone_band(
     f0_max=400,
     n_harmonics=5,
     low_pct=0.01,
-    high_pct=0.995
+    high_pct=0.995,
+    min_low=60.0
 ):
 
     # Long-term average magnitude spectrum
@@ -117,14 +118,15 @@ def estimate_drone_band(
     low = freqs[np.searchsorted(cum, low_pct)]
     high = freqs[np.searchsorted(cum, high_pct)]
 
-    # Never cut above the fundamental; clamp to sane range
-    low = max(min(low, f0 * 0.8), 20.0)
+    # Floor the low edge to cut sub-band wind/rumble from the original scene
+    # (it overlaps the lowest drone partials but otherwise leaks into the mix).
+    low = max(min(low, f0 * 0.8), min_low)
     high = min(high, sr * 0.475)
 
     return float(low), float(high), float(f0)
 
 
-def isolate_drone_audio(input_path, output_path):
+def isolate_drone_audio(input_path, output_path, min_low=60.0):
 
     # Load mono audio
     y, sr = librosa.load(
@@ -136,8 +138,10 @@ def isolate_drone_audio(input_path, output_path):
     # Normalize
     y = rms_normalize(y)
 
-    # Estimate the drone band from the signal itself
-    low, high, f0 = estimate_drone_band(y, sr)
+    # Estimate the drone band from the signal itself. A higher min_low cuts
+    # more low-frequency wind/rumble (good for placing the drone in a new
+    # scene) at the cost of the drone's lowest harmonics.
+    low, high, f0 = estimate_drone_band(y, sr, min_low=min_low)
     print(f"Estimated drone f0={f0:.1f} Hz, band {low:.0f}-{high:.0f} Hz")
 
     # Remove wind rumble

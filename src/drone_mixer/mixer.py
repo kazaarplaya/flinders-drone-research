@@ -136,6 +136,7 @@ def dynamic_snr_mix(
     background_signal: np.ndarray,
     sample_rate: int,
     snr_profile: np.ndarray,
+    min_snr_db: float = -10.0,
 ):
 
     # Match lengths
@@ -173,6 +174,10 @@ def dynamic_snr_mix(
         background_frames,
         snr_profile
     ):
+
+        # Clamp the target so silent-drone frames (whose profile SNR can floor
+        # at huge negative values) don't blast the background
+        target_snr_db = max(float(target_snr_db), min_snr_db)
 
         drone_power = np.mean(drone_frame ** 2)
 
@@ -215,39 +220,32 @@ def dynamic_snr_mix(
     return output_signal.astype(np.float32)
 
 
-# --------------------------------------------------
-# Example Usage
-# --------------------------------------------------
+def main():
+    import argparse
 
-# Load isolated drone
-drone_signal, sample_rate = load_audio(
-    "isolated_hover.wav"
-)
+    parser = argparse.ArgumentParser(
+        description="Mix an isolated drone onto a background at a target SNR profile."
+    )
+    parser.add_argument("drone", help="Isolated drone WAV.")
+    parser.add_argument("background", help="Background WAV to mix onto.")
+    parser.add_argument("snr_profile", help="SNR profile JSON (smoothed_snr_db).")
+    parser.add_argument("output", help="Output synthetic WAV path.")
+    args = parser.parse_args()
 
-# Load background
-background_signal, _ = load_audio(
-    "park_noise.wav",
-    target_sample_rate=sample_rate
-)
+    drone_signal, sample_rate = load_audio(args.drone)
+    background_signal, _ = load_audio(args.background, target_sample_rate=sample_rate)
+    snr_profile = load_snr_profile(args.snr_profile)
 
-# Load SNR profile from JSON
-snr_profile = load_snr_profile(
-    "hover_snr.json"
-)
+    mixed_signal = dynamic_snr_mix(
+        drone_signal,
+        background_signal,
+        sample_rate,
+        snr_profile,
+    )
 
-# Generate synthetic mixture
-mixed_signal = dynamic_snr_mix(
-    drone_signal,
-    background_signal,
-    sample_rate,
-    snr_profile
-)
+    save_audio(args.output, mixed_signal, sample_rate)
+    print(f"Synthetic audio generated → {args.output}")
 
-# Save output
-save_audio(
-    "synthetic_hover.wav",
-    mixed_signal,
-    sample_rate
-)
 
-print("Synthetic audio generated.")
+if __name__ == "__main__":
+    main()
