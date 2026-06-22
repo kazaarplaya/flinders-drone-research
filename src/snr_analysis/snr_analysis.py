@@ -231,14 +231,29 @@ def main() -> None:
         help="Optional moving-average window size in frames.",
     )
     parser.add_argument(
+        "--phases",
+        nargs="+",
+        default=PHASE_NAMES,
+        metavar="PHASE",
+        help="Which phases to process (default: all). e.g. --phases hover landing",
+    )
+    parser.add_argument(
+        "--out-dir",
+        type=Path,
+        default=Path("data/processed/snr_profiles"),
+        help="Directory to write <phase>_snr.json files into.",
+    )
+    parser.add_argument(
         "--plot-full",
         action="store_true",
         help="Plot an additional SNR curve across all phases.",
     )
     args = parser.parse_args()
 
+    args.out_dir.mkdir(parents=True, exist_ok=True)
+
     background_path = args.background or (args.base_dir / "background.wav")
-    phase_paths = resolve_phase_paths(args.base_dir, PHASE_NAMES)
+    phase_paths = resolve_phase_paths(args.base_dir, args.phases)
 
     background_signal, sample_rate = load_audio(background_path)
     background_power, _, _ = estimate_background_power(background_signal, sample_rate)
@@ -247,8 +262,13 @@ def main() -> None:
     all_snr = []
     time_offset = 0.0
 
-    for phase_name in PHASE_NAMES:
-        phase_signal, phase_sample_rate = load_audio(phase_paths[phase_name], target_sample_rate=sample_rate)
+    for phase_name in args.phases:
+        phase_path = phase_paths[phase_name]
+        if not phase_path.exists():
+            print(f"[skip] {phase_name}: file not found at {phase_path}")
+            continue
+
+        phase_signal, phase_sample_rate = load_audio(phase_path, target_sample_rate=sample_rate)
 
         # Check sample rate. Throw error if not equal
         if phase_sample_rate != sample_rate:
@@ -263,7 +283,8 @@ def main() -> None:
 
         # Smooth SNR profile
         smoothed_snr = smooth_curve(snr_db, args.smooth_window)
-        with open(f".\data\processed\snr_profiles\{phase_name}_snr.json", "w") as f:
+        out_path = args.out_dir / f"{phase_name}_snr.json"
+        with open(out_path, "w") as f:
             json.dump(
                 {
                     "phase": phase_name,

@@ -31,7 +31,7 @@ def band_power_ratio(file, low=60, high=4000):
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage:")
-        print("python compare.py file1.wav file2.wav")
+        print("python compare1.py file1.wav file2.wav")
         sys.exit(1)
 
     files = sys.argv[1:]

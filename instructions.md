@@ -34,7 +34,7 @@ The ```compare.py``` script compares two files for their energy concentration in
 
 Run the script:
 ```bash
-python compare.py "FILE_1.wav" "FILE_2.wav"
+python compare1.py "FILE_1.wav" "FILE_2.wav"
 ```
 
 Example output:
